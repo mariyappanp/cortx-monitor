@@ -44,7 +44,8 @@ class StorageMap(ResourceMap):
         super().__init__()
         self.validate_storage_type_support()
         self.storage_frus = {
-            "controllers": self.get_controllers_info
+            "controllers": self.get_controllers_info,
+            "sas_ports": self.get_sas_ports_info,
             }
 
     @staticmethod
@@ -78,15 +79,16 @@ class StorageMap(ResourceMap):
         rpath: Resouce path (Example: nodes[0]>storage[0]>hw>controllers)
         """
         info = {}
+        fru_found = False
         nodes = rpath.strip().split(">")
         leaf_node, _ = self.get_node_details(nodes[-1])
         if leaf_node == "storage":
             for fru in self.storage_frus:
                 info.update({fru: self.storage_frus[fru]()})
             info["last_updated"] = int(time.time())
+            fru_found = True
         else:
             fru = None
-            fru_found = False
             for node in nodes:
                 fru, _ = self.get_node_details(node)
                 if self.storage_frus.get(fru):
@@ -136,7 +138,8 @@ class StorageMap(ResourceMap):
 
         fru_data = []
         fru_uri_map = {
-            "controllers": ENCL.URI_CLIAPI_SHOWCONTROLLERS
+            "controllers": ENCL.URI_CLIAPI_SHOWCONTROLLERS,
+            "expander-ports": ENCL.URI_CLIAPI_SASHEALTHSTATUS,
         }
         url = ENCL.build_url(fru_uri_map.get(fru))
         response = ENCL.ws_request(url, ENCL.ws.HTTP_GET)
@@ -149,8 +152,33 @@ class StorageMap(ResourceMap):
 
         return fru_data
 
+    def get_sas_ports_info(self):
+        data = []
+        sas_ports = self.get_realstor_encl_data("expander-ports")
+        if not sas_ports:
+            return data
+        for sas_port in sas_ports:
+            port_dict = {
+                "uid": sas_port.get("durable-id"),
+                "fru": "false",
+                "last_updated": int(time.time()),
+                "health": {
+                    "status": sas_port.get("health", "NA"),
+                    "description": sas_port.get("health-reason"),
+                    "recommendation": sas_port.get("health-recommendation"),
+                    "specifics": [
+                        {
+                            "sas-port-type": sas_port.get("sas-port-type"),
+                            "controller": sas_port.get("controller")
+                        }
+                    ]
+                }
+            }
+            data.append(port_dict)
+        return data
 
-# if __name__ == "__main__":
-#     storage = StorageMap()
-#     health_data = storage.get_health_info(rpath="nodes[0]>storage[0]>hw>controllers")
-#     print(health_data)
+
+if __name__ == "__main__":
+    storage = StorageMap()
+    health_data = storage.get_health_info(rpath="nodes[0]>storage[0]")
+    print(health_data)
